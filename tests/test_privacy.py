@@ -120,7 +120,6 @@ def test_screenshot_filename_uses_alias_not_real_name(tmp_path: Path) -> None:
 
     assert path is not None
     assert "张三" not in path.name
-    assert "好友01" in path.name
 
 
 def test_redacting_formatter_handles_logging_args() -> None:

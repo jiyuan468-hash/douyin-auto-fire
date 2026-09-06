@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抖音自动发送 - 控制面板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f0f13;--surface:#1a1a24;--card:#22222e;--border:#2e2e3e;--primary:#6c5ce7;--primary-light:#a29bfe;--success:#00cec9;--warn:#fdcb6e;--danger:#ff7675;--text:#e2e2e2;--text-dim:#8888a0;--text-muted:#555570}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}
+a{color:var(--primary-light);text-decoration:none}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header h1{font-size:18px;font-weight:600;display:flex;align-items:center;gap:10px}
+.header h1 span{font-size:22px}
+.status-bar{display:flex;gap:16px;align-items:center}
+.status-item{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.green{background:var(--success)}
+.dot.yellow{background:var(--warn)}
+.dot.red{background:var(--danger)}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
+.card-full{grid-column:1/-1}
+.card h2{font-size:15px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px;color:var(--text)}
+.card h2 .icon{font-size:18px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px;font-weight:500}
+.form-group input,.form-group textarea,.form-group select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:14px;font-family:inherit;transition:border-color .2s}
+.form-group input:focus,.form-group textarea:focus{outline:none;border-color:var(--primary)}
+.form-group textarea{resize:vertical;min-height:60px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.friends-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.friend-tag{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:13px;display:flex;align-items:center;gap:6px}
+.friend-tag .remove{cursor:pointer;color:var(--danger);font-size:16px;line-height:1}
+.friend-tag .remove:hover{opacity:.7}
+.btn{padding:9px 20px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:#5b4bd6}
+.btn-success{background:var(--success);color:#000}
+.btn-success:hover{opacity:.85}
+.btn-warn{background:var(--warn);color:#000}
+.btn-warn:hover{opacity:.85}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
+.btn-outline:hover{border-color:var(--primary);color:var(--primary-light)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.log-area{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'Cascadia Code','Fira Code',Consolas,monospace;font-size:12px;line-height:1.7;max-height:300px;overflow-y:auto;white-space:pre-wrap;color:var(--text-dim)}
+.log-area .info{color:#74b9ff}
+.log-area .warn{color:var(--warn)}
+.log-area .error{color:var(--danger)}
+.log-area .success{color:var(--success)}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.result-item{background:var(--surface);border-radius:8px;padding:14px;text-align:center}
+.result-item .num{font-size:28px;font-weight:700;line-height:1}
+.result-item .label{font-size:12px;color:var(--text-dim);margin-top:4px}
+.result-item.success .num{color:var(--success)}
+.result-item.failed .num{color:var(--danger)}
+.result-item.pending .num{color:var(--warn)}
+.target-list{margin-top:12px}
+.target-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface);border-radius:6px;margin-bottom:6px;font-size:13px}
+.target-item .status{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.target-item .status.ok{background:rgba(0,206,201,.15);color:var(--success)}
+.target-item .status.fail{background:rgba(255,118,117,.15);color:var(--danger)}
+.target-item .status.run{background:rgba(253,203,110,.15);color:var(--warn);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 20px;font-size:14px;z-index:999;transform:translateY(100px);opacity:0;transition:all .3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.success{border-color:var(--success)}
+.toast.error{border-color:var(--danger)}
+.toggle-group{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+.toggle-group .btn{border-radius:0;border:none;border-right:1px solid var(--border)}
+.toggle-group .btn:last-child{border-right:none}
+.toggle-group .btn.active{background:var(--primary);color:#fff}
+.add-row{display:flex;gap:8px;margin-top:8px}
+.add-row input{flex:1}
+.section-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:10px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>🚀</span> 抖音自动发送 · 控制面板</h1>
+  <div class="status-bar">
+    <div class="status-item"><span class="dot" id="loginDot"></span><span id="loginText">检查中...</span></div>
+    <div class="status-item">🕐 <span id="clock"></span></div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="grid">
+
+    <!-- 任务配置 -->
+    <div class="card">
+      <h2><span class="icon">⚙️</span> 任务配置</h2>
+      <div class="form-group">
+        <label>任务 ID</label>
+        <input id="taskId" type="text" value="{{ config.task_id }}">
+      </div>
+      <div class="form-group">
+        <label>发送间隔（秒，min / max）</label>
+        <div class="form-row">
+          <input id="intervalMin" type="number" value="{{ config.send_interval_seconds['min'] }}" min="1">
+          <input id="intervalMax" type="number" value="{{ config.send_interval_seconds['max'] }}" min="1">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>发送消息</label>
+        <div id="messagesContainer">
+          {% for msg in (config.messages if config.messages else []) %}
+          <div class="msg-row" style="display:flex;gap:8px;margin-bottom:6px">
+            <input type="text" class="msg-text" value="{{ msg.value }}" style="flex:1" placeholder="消息内容">
+            <button onclick="this.parentElement.remove()" style="background:var(--danger);color:#fff;border:none;border-radius:6px;padding:0 10px;cursor:pointer;font-size:16px">×</button>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="add-row">
+          <input id="newMsgInput" type="text" placeholder="输入新消息...">
+          <button class="btn btn-outline" onclick="addMessage()">+ 添加</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>目标好友</label>
+        <div class="friends-list" id="friendsList">
+          {% for f in (config.friends if config.friends else []) %}
+          <span class="friend-tag">{{ f }}<span class="remove" onclick="this.parentElement.remove()">×</span></span>
+          {% endfor %}
+        </div>
+        <div class="add-row">
+          <input id="newFriendInput" type="text" placeholder="输入好友昵称...">
+          <button class="btn btn-outline" onclick="addFriend()">+ 添加</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="section-title">高级选项</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);cursor:pointer">
+            <input type="checkbox" id="preventDup" {% if config.prevent_duplicates %}checked{% endif %}> 防重复发送
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-dim);cursor:pointer">
+            <input type="checkbox" id="retryFailed" {% if config.retry_failed_targets %}checked{% endif %}> 失败重试
+          </label>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveConfig()">💾 保存配置</button>
+      </div>
+    </div>
+
+    <!-- 执行任务 -->
+    <div class="card">
+      <h2><span class="icon">▶️</span> 执行任务</h2>
+      <div style="margin-bottom:16px">
+        <div class="section-title" style="margin-bottom:8px">登录状态</div>
+        <div id="loginStatus" style="font-size:13px;color:var(--text-dim)">检测中...</div>
+      </div>
+      <div style="margin-bottom:16px">
+        <div class="section-title" style="margin-bottom:8px">运行模式</div>
+        <div class="toggle-group">
+          <button class="btn btn-outline active" id="btnDryRun" onclick="setMode(true)">🔍 Dry Run</button>
+          <button class="btn btn-outline" id="btnRealRun" onclick="setMode(false)">🚀 正式发送</button>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-success" id="runBtn" onclick="runTask()" style="flex:1">▶ 开始执行</button>
+        <button class="btn btn-outline" onclick="location.reload()">↻ 刷新</button>
+      </div>
+      <div id="taskStatus" style="margin-top:16px;font-size:13px;color:var(--text-dim);display:none">
+        任务运行中，请稍候...
+      </div>
+    </div>
+
+    <!-- 执行结果 -->
+    <div class="card card-full" id="resultCard" style="display:none">
+      <h2><span class="icon">📊</span> 执行结果</h2>
+      <div class="result-grid" id="resultGrid"></div>
+      <div class="target-list" id="targetList"></div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="card card-full">
+      <h2><span class="icon">📋</span> 运行日志</h2>
+      <div class="log-area" id="logArea"></div>
+      <div class="btn-row" style="margin-top:10px;margin-bottom:0">
+        <button class="btn btn-outline" onclick="refreshLog()">↻ 刷新日志</button>
+        <button class="btn btn-outline" onclick="clearLog()">🗑 清空日志</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let isDryRun = true;
+let taskRunning = false;
+
+// Clock
+function updateClock(){
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(updateClock,1000);
+updateClock();
+
+// Toast
+function toast(msg, type='success'){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(()=> t.className='toast', 3000);
+}
+
+// Login status
+async function checkLogin(){
+  try{
+    const r = await fetch('/api/login-status');
+    const d = await r.json();
+    const dot = document.getElementById('loginDot');
+    const text = document.getElementById('loginText');
+    const status = document.getElementById('loginStatus');
+    if(d.has_storage){
+      dot.className='dot green';
+      text.textContent='已登录';
+      status.innerHTML='<span style="color:var(--success)">✅ 登录有效（'+d.cookie_count+' 个 Cookie）</span>';
+    } else {
+      dot.className='dot red';
+      text.textContent='未登录';
+      status.innerHTML='<span style="color:var(--danger)">❌ 未登录，请先扫码登录</span><br><button class="btn btn-outline" style="margin-top:8px" onclick="runLogin()">📱 去登录</button>';
+    }
+  }catch(e){
+    document.getElementById('loginDot').className='dot red';
+    document.getElementById('loginText').textContent='检测失败';
+    document.getElementById('loginStatus').innerHTML='<span style="color:var(--danger)">检测失败</span>';
+  }
+}
+
+async function runLogin(){
+  const btn = event.target;
+  btn.disabled=true; btn.textContent='登录中...';
+  try{
+    const r = await fetch('/api/run-login',{method:'POST'});
+    const d = await r.json();
+    if(d.ok) toast('登录完成，请刷新页面');
+    else toast('登录失败: '+(d.error||d.output),'error');
+  }catch(e){ toast('请求失败','error'); }
+  btn.disabled=false; btn.textContent='📱 去登录';
+  checkLogin();
+}
+
+// Friends
+function addFriend(){
+  const inp = document.getElementById('newFriendInput');
+  const name = inp.value.trim();
+  if(!name) return;
+  const tag = document.createElement('span');
+  tag.className='friend-tag';
+  tag.innerHTML=name+'<span class="remove" onclick="this.parentElement.remove()">×</span>';
+  document.getElementById('friendsList').appendChild(tag);
+  inp.value='';
+}
+function addMessage(){
+  const inp = document.getElementById('newMsgInput');
+  const text = inp.value.trim();
+  if(!text) return;
+  const div = document.createElement('div');
+  div.className='msg-row';
+  div.style.cssText='display:flex;gap:8px;margin-bottom:6px';
+  div.innerHTML='<input type="text" class="msg-text" value="'+text+'" style="flex:1"><button onclick="this.parentElement.remove()" style="background:var(--danger);color:#fff;border:none;border-radius:6px;padding:0 10px;cursor:pointer;font-size:16px">×</button>';
+  document.getElementById('messagesContainer').appendChild(div);
+  inp.value='';
+}
+
+// Config
+function saveConfig(){
+  const friends = [...document.querySelectorAll('.friend-tag')].map(e=>e.textContent.replace('×','').trim());
+  const messages = [...document.querySelectorAll('.msg-text')].map(e=>e.value).filter(v=>v.trim());
+  if(!friends.length){toast('请至少添加一个好友','error');return;}
+  if(!messages.length){toast('请至少添加一条消息','error');return;}
+  const cfg = {
+    task_id: document.getElementById('taskId').value,
+    friends: friends,
+    messages: messages.map(v=>({type:'text',value:v.trim()})),
+    send_interval_seconds: {
+      min: parseInt(document.getElementById('intervalMin').value)||10,
+      max: parseInt(document.getElementById('intervalMax').value)||30
+    },
+    prevent_duplicates: document.getElementById('preventDup').checked,
+    retry_failed_targets: document.getElementById('retryFailed').checked,
+    timezone: 'Asia/Shanghai',
+    target_open_retries: 1,
+    target_open_timeout_seconds: 15,
+    retry_delay_seconds: 30
+  };
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)})
+    .then(r=>r.json()).then(d=>{if(d.ok)toast('配置已保存');else toast('保存失败','error');})
+    .catch(()=>toast('保存失败','error'));
+}
+
+// Task mode
+function setMode(dry){
+  isDryRun=dry;
+  document.getElementById('btnDryRun').className='btn btn-outline '+(dry?'active':'');
+  document.getElementById('btnRealRun').className='btn btn-outline '+(dry?'':'active');
+  document.getElementById('runBtn').textContent=dry?'🔍 Dry Run':'🚀 正式发送';
+}
+
+// Run task
+async function runTask(){
+  if(taskRunning)return;
+  taskRunning=true;
+  const btn=document.getElementById('runBtn');
+  btn.disabled=true;btn.textContent='运行中...';
+  document.getElementById('taskStatus').style.display='block';
+  try{
+    const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:isDryRun})});
+    const d=await r.json();
+    if(d.ok){
+      toast('任务执行完成');
+      showResult(d.result);
+    }else{
+      toast((d.error||'执行失败'), 'error');
+    }
+    if(d.output) appendLog(d.output);
+  }catch(e){toast('请求失败','error');}
+  btn.disabled=false;btn.textContent=isDryRun?'🔍 Dry Run':'🚀 正式发送';
+  taskRunning=false;
+  document.getElementById('taskStatus').style.display='none';
+}
+
+function showResult(result){
+  const card=document.getElementById('resultCard');
+  card.style.display='block';
+  const results=result.results||[];
+  const ok=results.filter(r=>r.status==='success').length;
+  const fail=results.filter(r=>r.status==='failed').length;
+  document.getElementById('resultGrid').innerHTML=`
+    <div class="result-item success"><div class="num">${ok}</div><div class="label">✅ 成功</div></div>
+    <div class="result-item failed"><div class="num">${fail}</div><div class="label">❌ 失败</div></div>
+    <div class="result-item"><div class="num" style="color:var(--text)">${results.length}</div><div class="label">📋 总计</div></div>
+    <div class="result-item"><div class="num" style="color:var(--text)">${result.dry_run?'Dry Run':'正式'}</div><div class="label">📌 模式</div></div>
+  `;
+  const list=document.getElementById('targetList');
+  list.innerHTML=results.map(r=>`
+    <div class="target-item">
+      <div class="status ${r.status==='success'?'ok':r.status==='failed'?'fail':'run'}">${r.status==='success'?'✓':r.status==='failed'?'✗':'⟳'}</div>
+      <span>${r.target}</span>
+      <span style="margin-left:auto;font-size:12px;color:var(--text-muted)">${r.sent||0} 条消息 ${r.error?'· '+r.error.slice(0,40):''}</span>
+    </div>
+  `).join('');
+}
+
+// Log
+async function refreshLog(){
+  try{
+    const r=await fetch('/api/log');
+    const d=await r.json();
+    document.getElementById('logArea').innerHTML=formatLog(d.lines);
+  }catch(e){}
+}
+function clearLog(){
+  if(confirm('确定清空日志？')){
+    const fs=require('fs');
+    const logPath='${PROJECT_ROOT}\\artifacts\\run.log';
+    // We can't delete from client-side, use API
+    fetch('/api/clear-log',{method:'POST'}).then(()=>refreshLog()).catch(()=>toast('需要手动清空'));
+  }
+}
+function appendLog(text){
+  const el=document.getElementById('logArea');
+  el.innerHTML=formatLog(text.split('\n'));
+}
+function formatLog(lines){
+  return lines.map(l=>{
+    if(l.includes('ERROR')||l.includes('错误'))return'<div class="error">'+esc(l)+'</div>';
+    if(l.includes('WARNING')||l.includes('警告'))return'<div class="warn">'+esc(l)+'</div>';
+    if(l.includes('成功')||l.includes('success'))return'<div class="success">'+esc(l)+'</div>';
+    return'<div>'+esc(l)+'</div>';
+  }).join('');
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// Init
+checkLogin();
+refreshLog();
+setInterval(refreshLog,5000);
+</script>
+</body>
+</html>

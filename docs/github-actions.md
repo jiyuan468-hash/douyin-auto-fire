@@ -567,11 +567,9 @@ Dry Run 成功后即可继续正常使用。
 
 ---
 
-## 10. 消息通知（可选）
+## 10. 钉钉通知（可选）
 
-### 钉钉机器人
-
-如果希望通过钉钉接收任务结果，可以添加：
+如果希望通过钉钉接收任务结果，可以额外添加：
 
 | Secret | 内容 |
 | --- | --- |
@@ -580,85 +578,7 @@ Dry Run 成功后即可继续正常使用。
 
 这两个 Secret 必须同时配置。
 
-### 通用 Webhook（企业微信、飞书、Telegram 等）
-
-项目支持向任意 Webhook 端点发送通知，适用于企业微信、飞书、Slack、Discord、Telegram 等平台。
-
-需要添加的 Secrets：
-
-| Secret | 内容 | 是否必需 |
-| --- | --- | --- |
-| `WEBHOOK_URL` | Webhook 接收端地址 | 必需 |
-| `WEBHOOK_TEMPLATE` | 自定义消息模板（JSON 格式）| 可选 |
-| `WEBHOOK_HEADERS` | 自定义 HTTP 请求头 | 可选 |
-
-#### 配置示例
-
-**企业微信群机器人**
-
-1. 企业微信群 > 添加群机器人 > 复制 Webhook 地址
-2. 添加 Secret `WEBHOOK_URL`：
-   ```
-   https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY
-   ```
-3. 添加 Secret `WEBHOOK_TEMPLATE`：
-   ```json
-   {"msgtype":"text","text":{"content":"🔥 抖音任务 {task_id}\n\n{status}\n✅ 成功: {success_count}\n❌ 失败: {failed_count}\n\n⏰ {timestamp}"}}
-   ```
-
-**飞书群机器人**
-
-1. 飞书群 > 设置 > 群机器人 > 添加机器人 > 复制 Webhook 地址
-2. 添加 Secret `WEBHOOK_URL`：
-   ```
-   https://open.feishu.cn/open-apis/bot/v2/hook/YOUR_KEY
-   ```
-3. 添加 Secret `WEBHOOK_TEMPLATE`：
-   ```json
-   {"msg_type":"text","content":{"text":"🔥 抖音任务 {task_id}\n\n{status}\n✅ 成功: {success_count}\n❌ 失败: {failed_count}\n\n⏰ {timestamp}"}}
-   ```
-
-**Telegram Bot**
-
-1. Telegram 搜索 @BotFather，发送 `/newbot` 创建机器人，获取 token
-2. 搜索 @userinfobot，发送消息获取你的 chat_id
-3. 添加 Secret `WEBHOOK_URL`：
-   ```
-   https://api.telegram.org/botYOUR_BOT_TOKEN/sendMessage
-   ```
-4. 添加 Secret `WEBHOOK_TEMPLATE`：
-   ```json
-   {"chat_id":"YOUR_CHAT_ID","text":"🔥 抖音任务 {task_id}\n\n{status}\n✅ 成功: {success_count}\n❌ 失败: {failed_count}\n\n⏰ {timestamp}"}
-   ```
-
-**Discord 频道**
-
-1. Discord 频道设置 > 整合 > Webhook > 新建 > 复制 URL
-2. 添加 Secret `WEBHOOK_URL`：
-   ```
-   https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
-   ```
-3. 添加 Secret `WEBHOOK_TEMPLATE`：
-   ```json
-   {"content":"🔥 **抖音任务 {task_id}**\n\n{status}\n成功: {success_count} | 失败: {failed_count}\n\n{timestamp}"}
-   ```
-
-#### 模板变量
-
-可以在 `WEBHOOK_TEMPLATE` 中使用以下变量：
-
-- `{task_id}` - 任务 ID
-- `{status}` - 执行状态（全部成功/存在失败）
-- `{mode}` - 运行模式（正式发送/检查模式）
-- `{success_count}` - 成功数量
-- `{failed_count}` - 失败数量
-- `{total_count}` - 总数量
-- `{timestamp}` - 时间戳
-- `{results_json}` - 完整结果（JSON 数组）
-
-如果不配置 `WEBHOOK_TEMPLATE`，将使用默认格式。
-
-**注意**：所有通知配置都是可选的，不配置不影响项目正常运行。
+如果不需要钉钉通知，两个都不要添加即可，不影响项目正常运行。
 
 ---
 

@@ -12,3 +12,5 @@ config/tasks/
 config.json
 storage-state.json
 storage_state/
+chrome-cookies.json
+web/__pycache__/

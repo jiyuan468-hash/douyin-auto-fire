@@ -1,3 +1,4 @@
+"""Browser session management and Douyin page interaction."""
 from __future__ import annotations
 
 import json
@@ -36,15 +37,13 @@ class SearchBoxNotReadyError(RuntimeError):
     """私信页已打开但搜索框未就绪；说明渲染慢，而非登录失效。"""
 
 
-# 私信页是 SPA，domcontentloaded 之后搜索框由 JS 异步挂载，冷启动时可能超过
-# 单轮等待窗口。这里做有限次数重试，并在需要时 reload，避免把慢渲染误判为认证失效。
-SEARCH_BOX_RETRIES = 3
-_SEARCH_RETRY_DELAY_MS = 1_500
+# 自适应指数退避搜索框等待
+# 最多 6 次尝试，延迟依次为 500/1000/2000/4000/4000/4000ms，总容忍约 13.5s
+_SEARCH_MAX_ATTEMPTS = 6
+_SEARCH_BASE_DELAY_MS = 500
+_SEARCH_MAX_DELAY_MS = 4_000
 
 
-# Collects only safe, whitelisted attributes. It deliberately reads no
-# innerText / innerHTML / outerHTML / value, so page content, chat messages
-# and friend nicknames can never enter the public diagnostic output.
 _DOM_SNAPSHOT_JS = """() => {
   const attrs = el => ({
     tag: el.tagName.toLowerCase(),
@@ -119,50 +118,35 @@ async def verify_login(page: Page, timeout_ms: int = 15_000) -> None:
 
 async def open_private_messages(page: Page, timeout_ms: int = 15_000) -> None:
     await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
-    # 1. Explicit risk-control page takes priority, independently of login state.
     if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
         raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
-    # 2. An explicit login page is the only signal that lets us attribute to
-    #    expired credentials. Marker absence does not imply the credentials are
-    #    valid, so search-box detection (steps 3/4) is kept separate.
     if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
-        raise AuthenticationError("进入抖音私信页面后登录状态失效")
+        raise AuthenticationError("抖音登录状态已失效")
 
-    # 3. Detect the friend search box. The chat page is a SPA whose search box is
-    #    mounted asynchronously after domcontentloaded; a single detection round
-    #    occasionally misses it on a cold runner. Retry a few times, reloading the
-    #    page when the first round fails, before concluding anything.
-    for attempt in range(1, SEARCH_BOX_RETRIES + 1):
-        matched = await _first_visible_selector(page, SEARCH_INPUTS, timeout_ms)
-        if matched is not None:
-            LOGGER.info("检测到好友搜索框: selector=%s, 第 %d 次尝试", matched, attempt)
-            await page.wait_for_timeout(3_000)
+    # 自适应指数退避等待搜索框就绪
+    for attempt in range(_SEARCH_MAX_ATTEMPTS):
+        delay_ms = min(_SEARCH_BASE_DELAY_MS * (2 ** attempt), _SEARCH_MAX_DELAY_MS)
+        selector = await _first_visible_selector(page, SEARCH_INPUTS, timeout_ms=delay_ms)
+        if selector is not None:
             return
-        # The search box is missing; a freshly shown login prompt may only have
-        # appeared during the wait, so re-check before deciding to retry.
-        if await _any_visible(page, RISK_MARKERS, timeout_ms=2_000):
-            raise RiskControlError("抖音私信页面要求进行安全验证，任务已停止")
-        if await _any_visible(page, LOGIN_REQUIRED_MARKERS, timeout_ms=2_000):
-            raise AuthenticationError("进入抖音私信页面后登录状态失效")
-        if attempt < SEARCH_BOX_RETRIES:
-            LOGGER.warning("未检测到好友搜索框，第 %d/%d 次尝试，准备重试", attempt, SEARCH_BOX_RETRIES)
-            if attempt == 1:
-                # Reload once: a fresh load usually mounts the SPA search box.
-                try:
-                    await page.reload(wait_until="domcontentloaded", timeout=45_000)
-                except Exception:
-                    LOGGER.exception("reload 失败，改为重新访问私信页面")
-                    await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
-            else:
-                await page.wait_for_timeout(_SEARCH_RETRY_DELAY_MS)
+        LOGGER.warning("搜索框未就绪（第 %d/%d 次尝试），%dms 后重试...", attempt + 1, _SEARCH_MAX_ATTEMPTS, delay_ms)
+        await page.wait_for_timeout(delay_ms)
 
-    # 4. Search box is still missing after all attempts: emit a safe structural
-    #    diagnostic and choose the exception type based on evidence. Only an
-    #    explicit login marker justifies AuthenticationError; a page that is
-    #    already on /chat merely failed to render the search box in time.
+    # 所有尝试均失败，尝试 reload 后再做一次
+    LOGGER.warning("搜索框多次未就绪，尝试 reload 页面...")
+    try:
+        await page.reload(wait_until="domcontentloaded", timeout=45_000)
+    except Exception:
+        await page.goto(DOUYIN_CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
+    selector = await _first_visible_selector(page, SEARCH_INPUTS, timeout_ms=timeout_ms)
+    if selector is not None:
+        return
+
     diagnostic = await _collect_safe_diagnostic(page, LOGIN_REQUIRED_MARKERS, RISK_MARKERS)
     LOGGER.error("多次重试后仍未检测到好友搜索框，页面安全诊断:\n%s", diagnostic)
-    raise SearchBoxNotReadyError(f"私信页面已打开，但搜索框在 {SEARCH_BOX_RETRIES} 次重试后仍未就绪")
+    raise SearchBoxNotReadyError(
+        f"私信页面已打开，但搜索框在 {_SEARCH_MAX_ATTEMPTS} 次指数退避尝试后仍未就绪"
+    )
 
 
 async def save_trace(session: BrowserSession, path: Path) -> None:
@@ -186,11 +170,6 @@ async def _first_visible_selector(
     selectors: tuple[str, ...],
     timeout_ms: int,
 ) -> str | None:
-    """Return the first selector whose element becomes visible, or None.
-
-    Unlike ``_any_visible`` this also reports *which* selector matched, so the
-    diagnostic can distinguish a slow render from a structural change.
-    """
     per_selector = max(250, timeout_ms // max(1, len(selectors)))
     for selector in selectors:
         try:
@@ -211,18 +190,15 @@ async def _collect_safe_diagnostic(
         title = (await page.title()).strip()
     except Exception:
         title = ""
-
     try:
         snapshot = await page.evaluate(_DOM_SNAPSHOT_JS) or {}
     except Exception:
         snapshot = {}
-
     inputs = [_safe_element(item) for item in snapshot.get("inputs", [])]
     textareas = [_safe_element(item) for item in snapshot.get("textareas", [])]
     login_marker = await _any_visible(page, login_markers, timeout_ms=1_000)
     risk_marker = await _any_visible(page, risk_markers, timeout_ms=1_000)
     private_marker = await _any_visible(page, LOGIN_MARKERS, timeout_ms=1_000)
-
     parts = [
         f"url={url}",
         f"title={title}",
@@ -256,7 +232,6 @@ def _normalize_cookies(cookies: list[Any]) -> list[dict[str, Any]]:
     for index, cookie in enumerate(cookies):
         if not isinstance(cookie, dict):
             raise ConfigError(f"DOUYIN_COOKIE[{index}] 必须是对象")
-
         name = cookie.get("name")
         value = cookie.get("value")
         domain = cookie.get("domain")
@@ -266,35 +241,26 @@ def _normalize_cookies(cookies: list[Any]) -> list[dict[str, Any]]:
             raise ConfigError(f"DOUYIN_COOKIE[{index}] 缺少有效的 name 或 value")
         if not isinstance(domain, str) or not domain:
             raise ConfigError(f"DOUYIN_COOKIE[{index}] 缺少有效的 domain")
-
         expires = cookie.get("expires", cookie.get("expirationDate", -1))
         if cookie.get("session") is True:
             expires = -1
         if isinstance(expires, bool) or not isinstance(expires, (int, float)):
             expires = -1
-
-        normalized.append(
-            {
-                "name": name,
-                "value": value,
-                "domain": domain,
-                "path": cookie.get("path") if isinstance(cookie.get("path"), str) else "/",
-                "expires": expires,
-                "httpOnly": bool(cookie.get("httpOnly", False)),
-                "secure": bool(cookie.get("secure", False)),
-                "sameSite": _normalize_same_site(cookie.get("sameSite")),
-            }
-        )
+        normalized.append({
+            "name": name,
+            "value": value,
+            "domain": domain,
+            "path": cookie.get("path") if isinstance(cookie.get("path"), str) else "/",
+            "expires": expires,
+            "httpOnly": bool(cookie.get("httpOnly", False)),
+            "secure": bool(cookie.get("secure", False)),
+            "sameSite": _normalize_same_site(cookie.get("sameSite")),
+        })
     if not normalized:
         raise ConfigError("DOUYIN_COOKIE 没有有效 Cookie")
     return normalized
 
 
 def _normalize_same_site(value: Any) -> str:
-    mapping = {
-        "strict": "Strict",
-        "lax": "Lax",
-        "none": "None",
-        "no_restriction": "None",
-    }
+    mapping = {"strict": "Strict", "lax": "Lax", "none": "None", "no_restriction": "None"}
     return mapping.get(str(value).lower(), "Lax")

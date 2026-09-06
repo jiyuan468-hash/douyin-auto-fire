@@ -18,10 +18,18 @@ RISK_MARKERS = (
 )
 SEARCH_INPUTS = (
     'input[placeholder*="搜索"]',
-    'input[placeholder="搜索"]',  # 精确匹配备用 selector，兼容慢渲染时属性值变化
+    'input[placeholder*="搜索/输入"]',
+    'input[placeholder="搜索"]',
     '[role="textbox"][placeholder*="搜索"]',
+    '[role="textbox"][placeholder*="搜索/输入"]',
+    '[role="combobox"][placeholder*="搜索"]',
+    '[role="combobox"][placeholder*="搜索/输入"]',
     'input[aria-label*="搜索"]',
+    'input[aria-label*="搜索/输入"]',
     '[role="textbox"][aria-label*="搜索"]',
+    '[role="textbox"][aria-label*="搜索/输入"]',
+    '[role="combobox"][aria-label*="搜索"]',
+    '[role="combobox"][aria-label*="搜索/输入"]',
 )
 CHAT_PANEL_MARKERS = (
     '[class*="RightPanelHeader"]',

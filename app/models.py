@@ -6,6 +6,7 @@ from typing import Literal
 
 
 MessageType = Literal["text", "image", "douyin_sticker", "random"]
+NotificationChannel = Literal["dingtalk", "feishu", "webhook"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,9 @@ class TaskConfig:
     prevent_duplicates: bool
     target_open_retries: int = 1
     target_open_timeout_seconds: float = 15.0
+    retry_failed_targets: bool = True
+    retry_delay_seconds: float = 30.0
+    message_library: list | None = None
 
 
 @dataclass(frozen=True)
@@ -56,9 +60,11 @@ class Settings:
     trace: bool
     dingtalk_webhook: str | None = None
     dingtalk_secret: str | None = None
+    feishu_webhook: str | None = None
     webhook_url: str | None = None
+    webhook_method: str = "POST"
     webhook_headers: dict[str, str] | None = None
-    webhook_template: str | None = None
+    notification_channels: tuple[str, ...] = ("dingtalk",)
 
 
 @dataclass(frozen=True)

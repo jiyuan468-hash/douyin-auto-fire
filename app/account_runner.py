@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -15,18 +15,19 @@ from app.history import run_lock
 from app.main import LOGGER, _configure_logging, _parse_cli_args, run
 
 
-# 单账号模式的旧环境变量。多账号模式下由各账号的 env 文件提供，
-# 启动时先清掉进程环境中的旧值，避免残留值被所有账号继承。
 _LEGACY_ENV_KEYS = ("DOUYIN_COOKIE", "DOUYIN_STORAGE_STATE", "TASK_CONFIG", "ARTIFACTS_DIR")
+# 并发执行账号的最大数量，避免同时打开过多浏览器实例触发风控
+_MAX_CONCURRENT_ACCOUNTS = 3
 
 
 def run_all_accounts() -> int:
-    """串行执行 accounts.json 中所有启用账号。
+    """并行执行 accounts.json 中所有启用账号。
 
-    单账号失败（Cookie 失效、好友不存在、发送异常等）只记为该账号
-    failed，不阻止其他账号运行。返回码与单账号语义一致：
-    0=全部成功，1=存在失败，2=多账号配置整体错误。
+    单账号失败只记为该账号 failed，不阻止其他账号运行。
+    返回码语义与单账号一致：0=全部成功，1=存在失败，2=多账号配置整体错误。
     """
+    import asyncio as _asyncio
+
     args = _parse_cli_args()
     accounts = load_accounts()
     if not accounts:
@@ -38,12 +39,9 @@ def run_all_accounts() -> int:
         os.environ.pop(key, None)
 
     _configure_logging(Path("artifacts"), label=None, reset=True)
-    LOGGER.info("多账号模式：共 %d 个启用账号", len(accounts))
+    LOGGER.info("多账号模式：共 %d 个启用账号，最大并发 %d", len(accounts), _MAX_CONCURRENT_ACCOUNTS)
 
-    summary: list[tuple[str, str, str | None]] = []
-    for account in accounts:
-        # 先按默认产物目录配置账号日志，保证账号内任何失败都带 [账号id] 前缀；
-        # 若账号 env 显式指定了 ARTIFACTS_DIR，进入账号环境后会重定向。
+    async def _run_one(account) -> tuple[str, str, str | None]:
         _configure_logging(Path("artifacts") / account.id, label=account.id, reset=True)
         LOGGER.info("开始执行任务")
         try:
@@ -51,15 +49,29 @@ def run_all_accounts() -> int:
                 settings = load_settings(None)
                 _configure_logging(settings.artifacts_dir, label=account.id, reset=True)
                 with run_lock(settings.artifacts_dir / "run.lock"):
-                    code = asyncio.run(run(dry_run=args.dry_run))
+                    code = await run(dry_run=args.dry_run)
             status = "success" if code == 0 else "failed"
-            summary.append((account.id, status, None))
             LOGGER.info("执行完成: %s", status)
+            return (account.id, status, None)
         except Exception as exc:
-            # 异常消息可能包含好友真名（如 Playwright 定位器超时），此处只记录
-            # 异常类型；完整脱敏详情已由 run() 写入该账号的 run.log。
             summary.append((account.id, "failed", type(exc).__name__))
             LOGGER.exception("执行失败: %s", exc)
+            return (account.id, "failed", type(exc).__name__)
+
+    summary: list[tuple[str, str, str | None]] = []
+
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENT_ACCOUNTS)
+
+    async def _guarded_run(account) -> tuple[str, str, str | None]:
+        async with semaphore:
+            return await _run_one(account)
+
+    async def _gather_all():
+        tasks = [_guarded_run(acct) for acct in accounts]
+        return await asyncio.gather(*tasks)
+
+    results = _asyncio.run(_gather_all())
+    summary = list(results)
 
     _configure_logging(Path("artifacts"), label=None, reset=True)
     for account_id, status, error in summary:
@@ -81,13 +93,8 @@ def _load_account_env(env_file: Path, defaults: dict[str, str] | None = None) ->
 
 
 @contextmanager
-def account_env(env_file: Path, defaults: dict[str, str] | None = None) -> Iterator[None]:
-    """临时把账号 env 应用到进程环境，退出时完全恢复。
-
-    - 账号 env 中的键覆盖进程环境已有值，退出时恢复原值；
-    - 账号 env 新增的键，退出时删除，绝不泄漏给下一个账号；
-    - 账号 env 未定义的键（如 CI 的 HEADLESS）保持继承进程环境。
-    """
+def account_env(env_file: Path, defaults: dict[str, str] | None = None):
+    """临时把账号 env 应用到进程环境，退出时完全恢复。"""
     values = _load_account_env(env_file, defaults)
     saved = {key: os.environ[key] for key in values if key in os.environ}
     fresh = set(values) - set(saved)

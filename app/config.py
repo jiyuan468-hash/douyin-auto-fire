@@ -8,6 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from app.models import Message, Settings, Sticker, Target, TaskConfig
+from app.message_library import load_message_library
 
 
 class ConfigError(ValueError):
@@ -23,10 +24,22 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
     dingtalk_secret = _optional_env("DINGTALK_SECRET")
     if bool(dingtalk_webhook) != bool(dingtalk_secret):
         raise ConfigError("DINGTALK_WEBHOOK 和 DINGTALK_SECRET 必须同时配置")
-
+    feishu_webhook = _optional_env("FEISHU_WEBHOOK")
     webhook_url = _optional_env("WEBHOOK_URL")
-    webhook_headers = _parse_webhook_headers(_optional_env("WEBHOOK_HEADERS"))
-    webhook_template = _optional_env("WEBHOOK_TEMPLATE")
+    webhook_method = (os.getenv("WEBHOOK_METHOD") or "POST").upper()
+    if webhook_method not in ("GET", "POST"):
+        raise ConfigError(f"WEBHOOK_METHOD 必须是 GET 或 POST，当前值: {webhook_method}")
+    webhook_headers_raw = _optional_env("WEBHOOK_HEADERS")
+    webhook_headers: dict[str, str] | None = None
+    if webhook_headers_raw:
+        try:
+            webhook_headers = {k.strip(): v.strip() for k, v in _re_mod.findall(r"(\S+)\s*:\s*(\S+)", webhook_headers_raw)}
+        except Exception:
+            webhook_headers = None
+    notification_channels_raw = _optional_env("NOTIFICATION_CHANNELS")
+    notification_channels: tuple[str, ...] = ("dingtalk",)
+    if notification_channels_raw:
+        notification_channels = tuple(ch.strip() for ch in notification_channels_raw.split(",") if ch.strip())
 
     return Settings(
         task_config_path=task_path,
@@ -38,9 +51,11 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         trace=_parse_bool(os.getenv("TRACE", "true"), "TRACE"),
         dingtalk_webhook=dingtalk_webhook,
         dingtalk_secret=dingtalk_secret,
+        feishu_webhook=feishu_webhook,
         webhook_url=webhook_url,
+        webhook_method=webhook_method,
         webhook_headers=webhook_headers,
-        webhook_template=webhook_template,
+        notification_channels=notification_channels,
     )
 
 
@@ -70,6 +85,8 @@ def load_task(settings: Settings) -> TaskConfig:
     if interval_min < 0 or interval_max < interval_min:
         raise ConfigError("发送间隔必须满足 0 <= min <= max")
 
+    message_library = _parse_message_library(raw, "任务配置", settings.task_config_path.parent)
+    message_library = _parse_message_library(raw, "任务配置", settings.task_config_path.parent)
     stickers_raw = raw.get("stickers", {})
     if not isinstance(stickers_raw, dict):
         raise ConfigError("stickers 必须是对象")
@@ -85,6 +102,12 @@ def load_task(settings: Settings) -> TaskConfig:
     )
     if target_open_timeout_seconds <= 0:
         raise ConfigError("target_open_timeout_seconds 必须大于 0")
+    retry_failed_targets = raw.get("retry_failed_targets", True)
+    if not isinstance(retry_failed_targets, bool):
+        raise ConfigError("retry_failed_targets 必须是布尔值")
+    retry_delay_seconds = _number(raw.get("retry_delay_seconds", 30.0), "retry_delay_seconds")
+    if retry_delay_seconds < 0:
+        raise ConfigError("retry_delay_seconds 必须是非负数")
     task = TaskConfig(
         task_id=_non_empty_string(raw.get("task_id", "daily-streak"), "task_id"),
         timezone=_non_empty_string(raw.get("timezone", "Asia/Shanghai"), "timezone"),
@@ -96,6 +119,9 @@ def load_task(settings: Settings) -> TaskConfig:
         prevent_duplicates=raw.get("prevent_duplicates", False),
         target_open_retries=target_open_retries,
         target_open_timeout_seconds=target_open_timeout_seconds,
+        retry_failed_targets=retry_failed_targets,
+        retry_delay_seconds=retry_delay_seconds,
+        message_library=message_library,
     )
     if not isinstance(task.continue_on_error, bool):
         raise ConfigError("continue_on_error 必须是布尔值")
@@ -185,6 +211,38 @@ def _parse_stickers(raw: dict[str, Any]) -> dict[str, Sticker]:
     return result
 
 
+def _parse_message_library(raw, label, config_dir):
+    lib_cfg = raw.get("message_library")
+    if not isinstance(lib_cfg, dict):
+        return None
+    enabled = lib_cfg.get("enabled", False)
+    if not isinstance(enabled, bool) or not enabled:
+        return None
+    lib_path_str = lib_cfg.get("path")
+    if not lib_path_str or not isinstance(lib_path_str, str):
+        raise ConfigError(f"{label}.message_library.path 必须是非空字符串")
+    lib_path = Path(lib_path_str).expanduser()
+    if not lib_path.is_absolute():
+        lib_path = config_dir.parent / lib_path
+    return load_message_library(lib_path)
+
+
+def _parse_message_library(raw, label, config_dir):
+    lib_cfg = raw.get("message_library")
+    if not isinstance(lib_cfg, dict):
+        return None
+    enabled = lib_cfg.get("enabled", False)
+    if not isinstance(enabled, bool) or not enabled:
+        return None
+    lib_path_str = lib_cfg.get("path")
+    if not lib_path_str or not isinstance(lib_path_str, str):
+        raise ConfigError(f"{label}.message_library.path 必须是非空字符串")
+    lib_path = Path(lib_path_str).expanduser()
+    if not lib_path.is_absolute():
+        lib_path = config_dir.parent / lib_path
+    return load_message_library(lib_path)
+
+
 def _validate_stickers(task: TaskConfig) -> None:
     def visit(message: Message) -> None:
         if message.type == "douyin_sticker" and message.sticker not in task.stickers:
@@ -233,39 +291,3 @@ def _number(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{label} 必须是数字")
     return float(value)
-
-
-def _parse_webhook_headers(value: str | None) -> dict[str, str] | None:
-    """解析 WEBHOOK_HEADERS 环境变量为字典。
-
-    支持格式：
-    - JSON 对象: {"Content-Type": "application/json", "Authorization": "Bearer token"}
-    - 键值对: Content-Type=application/json,Authorization=Bearer token
-    """
-    if not value:
-        return None
-    value = value.strip()
-    if not value:
-        return None
-
-    # 尝试 JSON 格式（数组或对象都尝试解析）
-    if value.startswith("{") or value.startswith("["):
-        try:
-            parsed = json.loads(value)
-            if not isinstance(parsed, dict):
-                raise ConfigError("WEBHOOK_HEADERS JSON 必须是对象，不能是数组")
-            return {str(k): str(v) for k, v in parsed.items()}
-        except json.JSONDecodeError as exc:
-            raise ConfigError(f"WEBHOOK_HEADERS JSON 格式错误: {exc}") from exc
-
-    # 尝试键值对格式 key1=value1,key2=value2
-    headers = {}
-    for pair in value.split(","):
-        pair = pair.strip()
-        if not pair:
-            continue
-        if "=" not in pair:
-            raise ConfigError(f"WEBHOOK_HEADERS 键值对格式错误，应为 key=value: {pair}")
-        key, val = pair.split("=", 1)
-        headers[key.strip()] = val.strip()
-    return headers if headers else None
